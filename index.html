@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>ウォーターソート</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ウォーターソート">
+<meta name="theme-color" content="#16323d">
+<style>
+:root{--bg:#e8f1f4;--ink:#16323d;--glass:rgba(255,255,255,.55);--edge:#16323d55;--btn:#16323d;--btnink:#fff;color-scheme:light;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f2027;--ink:#e6f2f5;--glass:rgba(255,255,255,.08);--edge:#e6f2f588;--btn:#e6f2f5;--btnink:#0f2027;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0f2027;--ink:#e6f2f5;--glass:rgba(255,255,255,.08);--edge:#e6f2f588;--btn:#e6f2f5;--btnink:#0f2027;color-scheme:dark}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;touch-action:manipulation}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font-family:"Hiragino Sans","Noto Sans JP",system-ui,sans-serif;overflow:hidden;overscroll-behavior:none}
+body{display:flex;flex-direction:column;align-items:center;padding:14px 12px}
+h1{font-size:18px;margin:0}
+.bar{display:flex;justify-content:space-between;align-items:center;width:100%;max-width:420px;margin-bottom:6px}
+.lv{font-size:15px;font-variant-numeric:tabular-nums}
+#board{flex:1;min-height:0;display:grid;grid-template-columns:repeat(6,1fr);gap:16px 6px;width:100%;max-width:420px;padding:10px 0;justify-items:center}
+.tube{width:100%;max-width:42px;height:100%;max-height:130px;border:2px solid var(--edge);border-top:none;border-radius:0 0 21px 21px;background:var(--glass);display:flex;flex-direction:column-reverse;overflow:hidden;position:relative;transition:transform .15s}
+.tube.sel{transform:translateY(-9px)}
+.seg{flex:1;max-height:25%;transition:background .2s}
+.tube .seg+.seg{border-bottom:0}
+.ctrl{display:flex;gap:10px;margin-top:8px;width:100%;max-width:420px}
+button{flex:1;font:inherit;font-size:16px;padding:14px 0;border:0;border-radius:14px;background:var(--btn);color:var(--btnink);cursor:pointer}
+button:disabled{opacity:.35}
+button:active{opacity:.7}
+#msg{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#0008;z-index:5}
+#msg.on{display:flex}
+#msg div{background:var(--bg);padding:28px 32px;border-radius:20px;text-align:center}
+#msg p{margin:0 0 16px;font-size:20px}
+</style>
+</head>
+<body>
+<div class="bar"><h1>ウォーターソート</h1><span class="lv" id="lv"></span></div>
+<div id="board"></div>
+<div class="ctrl"><button id="undo">もどす</button><button id="reset">やりなおし</button><button id="skip">新しい盤面</button></div>
+<div id="msg"><div><p>クリア！</p><button id="next">次のレベルへ（試験管が増えます）</button></div></div>
+<script>
+// iOS Safari のダブルタップ／ピンチ拡大を防止
+var lastTouch=0;
+document.addEventListener('touchend',function(e){var n=Date.now();if(n-lastTouch<400)e.preventDefault();lastTouch=n;},{passive:false});
+['gesturestart','gesturechange','gestureend'].forEach(function(t){document.addEventListener(t,function(e){e.preventDefault();});});
+document.addEventListener('dblclick',function(e){e.preventDefault();});
+document.addEventListener('touchmove',function(e){e.preventDefault();},{passive:false});
+
+var COLORS=[];for(var ci=0;ci<40;ci++){COLORS.push('hsl('+Math.round((ci*137.5)%360)+','+(ci%2?78:88)+'%,'+(ci%3===0?42:ci%3===1?55:68)+'%)');}
+var CAP=4,level=1,tubes=[],start=[],hist=[],sel=-1;
+var board=document.getElementById('board');
+
+function gen(){
+  var n=Math.min(17+level,38),pool=[],i,j;
+  for(i=0;i<n;i++)for(j=0;j<CAP;j++)pool.push(i);
+  for(i=pool.length-1;i>0;i--){j=Math.floor(Math.random()*(i+1));var t=pool[i];pool[i]=pool[j];pool[j]=t;}
+  tubes=[];
+  for(i=0;i<n;i++)tubes.push(pool.slice(i*CAP,i*CAP+CAP));
+  tubes.push([]);tubes.push([]);
+  start=JSON.parse(JSON.stringify(tubes));hist=[];sel=-1;
+  document.getElementById('msg').className='';
+  draw();
+}
+function solved(){return tubes.every(function(t){return t.length===0||(t.length===CAP&&t.every(function(c){return c===t[0];}));});}
+function draw(){
+  document.getElementById('lv').textContent='レベル '+level;
+  document.getElementById('undo').disabled=hist.length===0;
+  var cols=tubes.length>26?8:tubes.length>22?7:6;board.style.gridTemplateColumns='repeat('+cols+',1fr)';board.style.gridTemplateRows='repeat('+Math.ceil(tubes.length/cols)+',1fr)';
+  board.innerHTML='';
+  tubes.forEach(function(t,i){
+    var d=document.createElement('div');d.className='tube'+(i===sel?' sel':'');
+    t.forEach(function(c){var s=document.createElement('div');s.className='seg';s.style.background=COLORS[c];d.appendChild(s);});
+    d.addEventListener('click',function(){tap(i);});
+    board.appendChild(d);
+  });
+}
+function tap(i){
+  if(sel===-1){if(tubes[i].length)sel=i;draw();return;}
+  if(sel===i){sel=-1;draw();return;}
+  var a=tubes[sel],b=tubes[i];
+  if(!a.length){sel=-1;draw();return;}
+  var c=a[a.length-1];
+  if(b.length<CAP&&(!b.length||b[b.length-1]===c)){
+    hist.push(JSON.parse(JSON.stringify(tubes)));
+    while(a.length&&a[a.length-1]===c&&b.length<CAP)b.push(a.pop());
+    sel=-1;draw();
+    if(solved())setTimeout(function(){document.getElementById('msg').className='on';},350);
+  }else{sel=b.length?i:-1;draw();}
+}
+document.getElementById('undo').onclick=function(){if(hist.length){tubes=hist.pop();sel=-1;draw();}};
+document.getElementById('reset').onclick=function(){tubes=JSON.parse(JSON.stringify(start));hist=[];sel=-1;draw();};
+document.getElementById('skip').onclick=gen;
+document.getElementById('next').onclick=function(){level++;gen();};
+gen();
+</script>
+</body>
+</html>
